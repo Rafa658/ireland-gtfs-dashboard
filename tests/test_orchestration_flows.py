@@ -76,3 +76,16 @@ def test_failure_notification_contains_no_exception_details(
             10,
         )
     ]
+
+
+def test_failure_notification_rejects_plain_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FAILURE_WEBHOOK_URL", "http://alerts.example.com/prefect")
+
+    with pytest.raises(ValueError, match="FAILURE_WEBHOOK_URL"):
+        notify_failure(
+            SimpleNamespace(name="gtfs-hourly-export"),
+            SimpleNamespace(id="run-id", name="run-name"),
+            SimpleNamespace(name="Failed"),
+        )

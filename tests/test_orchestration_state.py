@@ -65,7 +65,13 @@ def test_round_trips_retention_enabled_as_a_boolean() -> None:
     store.set_retention_enabled(True)
 
     assert FakeVariables.values[RETENTION_ENABLED_VARIABLE] is True
-    assert store.is_retention_enabled() is True
+    assert store.get_retention_enabled() is True
+
+
+def test_returns_none_when_retention_flag_is_missing() -> None:
+    store = PrefectCursorStore(variable_api=FakeVariables)
+
+    assert store.get_retention_enabled() is None
 
 
 def test_rejects_a_non_boolean_retention_flag() -> None:
@@ -73,4 +79,4 @@ def test_rejects_a_non_boolean_retention_flag() -> None:
     store = PrefectCursorStore(variable_api=FakeVariables)
 
     with pytest.raises(ValueError, match=RETENTION_ENABLED_VARIABLE):
-        store.is_retention_enabled()
+        store.get_retention_enabled()

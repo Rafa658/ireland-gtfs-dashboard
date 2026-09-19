@@ -15,7 +15,7 @@ class CursorStore(Protocol):
 
     def set_cursor(self, value: datetime) -> None: ...
 
-    def is_retention_enabled(self) -> bool: ...
+    def get_retention_enabled(self) -> bool | None: ...
 
     def set_retention_enabled(self, value: bool) -> None: ...
 
@@ -93,7 +93,7 @@ class ArchiveService:
         )
 
     def apply_retention(self, now: datetime) -> int:
-        if not self._cursor_store.is_retention_enabled():
+        if self._cursor_store.get_retention_enabled() is not True:
             return 0
 
         cursor = self._cursor_store.get_cursor()
@@ -113,7 +113,9 @@ def initialize_archive_state(
         cursor = initial_start
         cursor_store.set_cursor(cursor)
 
-    earliest = repository.earliest_timestamp()
-    retention_enabled = earliest is None or earliest >= initial_start
-    cursor_store.set_retention_enabled(retention_enabled)
+    retention_enabled = cursor_store.get_retention_enabled()
+    if retention_enabled is None:
+        earliest = repository.earliest_timestamp()
+        retention_enabled = earliest is None or earliest >= initial_start
+        cursor_store.set_retention_enabled(retention_enabled)
     return InitializationResult(cursor=cursor, retention_enabled=retention_enabled)

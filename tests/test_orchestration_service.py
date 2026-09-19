@@ -15,7 +15,7 @@ class FakeCursorStore:
         self,
         *,
         cursor: datetime | None = None,
-        retention_enabled: bool = False,
+        retention_enabled: bool | None = None,
     ) -> None:
         self.cursor = cursor
         self.retention_enabled = retention_enabled
@@ -28,7 +28,7 @@ class FakeCursorStore:
         self.cursor = value
         self.cursor_updates.append(value)
 
-    def is_retention_enabled(self) -> bool:
+    def get_retention_enabled(self) -> bool | None:
         return self.retention_enabled
 
     def set_retention_enabled(self, value: bool) -> None:
@@ -75,6 +75,20 @@ def test_initialization_sets_cursor_and_enables_retention_when_no_older_rows() -
 def test_initialization_keeps_retention_disabled_when_older_rows_exist() -> None:
     cursor_store = FakeCursorStore()
     repository = FakeRepository(earliest=INITIAL_START - timedelta(hours=1))
+    service = ArchiveService(repository, FakeExporter(), cursor_store, SAO_PAULO)
+
+    result = service.initialize(INITIAL_START)
+
+    assert result.retention_enabled is False
+    assert cursor_store.retention_enabled is False
+
+
+def test_initialization_preserves_a_manually_disabled_retention_flag() -> None:
+    cursor_store = FakeCursorStore(
+        cursor=INITIAL_START,
+        retention_enabled=False,
+    )
+    repository = FakeRepository(earliest=INITIAL_START)
     service = ArchiveService(repository, FakeExporter(), cursor_store, SAO_PAULO)
 
     result = service.initialize(INITIAL_START)

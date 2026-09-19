@@ -44,8 +44,8 @@ def _notification_url() -> str | None:
     if not value:
         return None
     parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("FAILURE_WEBHOOK_URL must be an HTTP or HTTPS URL")
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("FAILURE_WEBHOOK_URL must be an HTTPS URL")
     if parsed.username or parsed.password:
         raise ValueError("FAILURE_WEBHOOK_URL must not contain credentials")
     return value

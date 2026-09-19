@@ -46,8 +46,8 @@ def _optional_endpoint_url(name: str) -> str | None:
     if not value:
         return None
     parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise OrchestrationConfigError(f"{name} must be an HTTP or HTTPS URL")
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise OrchestrationConfigError(f"{name} must be an HTTPS URL")
     if parsed.username or parsed.password:
         raise OrchestrationConfigError(f"{name} must not contain credentials")
     return value
@@ -63,6 +63,13 @@ def _aware_datetime(name: str) -> datetime:
         raise OrchestrationConfigError(f"{name} must include a UTC offset")
     if value.minute or value.second or value.microsecond:
         raise OrchestrationConfigError(f"{name} must be aligned to an hour")
+    return value
+
+
+def _archive_prefix() -> str:
+    value = _required("ARCHIVE_PREFIX").strip("/")
+    if not value:
+        raise OrchestrationConfigError("ARCHIVE_PREFIX must contain a path segment")
     return value
 
 
@@ -108,9 +115,7 @@ class OrchestrationConfig:
             ) from error
 
         return cls(
-            postgres_connect_timeout_seconds=_positive_int(
-                "POSTGRES_CONNECT_TIMEOUT_SECONDS"
-            ),
+            postgres_connect_timeout_seconds=_positive_int("POSTGRES_CONNECT_TIMEOUT_SECONDS"),
             postgres_host=_required("POSTGRES_HOST"),
             postgres_port=_positive_int("POSTGRES_PORT", maximum=65535),
             postgres_db=_required("POSTGRES_DB"),
@@ -124,7 +129,7 @@ class OrchestrationConfig:
             minio_secret_key=_required("MINIO_SECRET_KEY"),
             minio_bucket=_required("MINIO_BUCKET"),
             minio_region=os.getenv("MINIO_REGION", "us-east-1").strip() or "us-east-1",
-            archive_prefix=_required("ARCHIVE_PREFIX").strip("/"),
+            archive_prefix=_archive_prefix(),
             archive_timezone_name=timezone_name,
             archive_initial_start=_aware_datetime("ARCHIVE_INITIAL_START"),
             archive_max_catchup_hours=_positive_int("ARCHIVE_MAX_CATCHUP_HOURS"),

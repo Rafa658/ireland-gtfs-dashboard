@@ -21,9 +21,11 @@ class FakeCursor(AbstractContextManager["FakeCursor"]):
         self,
         batches: list[list[tuple[Any, ...]]],
         *,
+        row: tuple[Any, ...] | None = None,
         rowcount: int = 0,
     ) -> None:
         self.batches = iter(batches)
+        self.row = row
         self.rowcount = rowcount
         self.executions: list[tuple[Any, Any]] = []
 
@@ -38,6 +40,10 @@ class FakeCursor(AbstractContextManager["FakeCursor"]):
 
     def fetchmany(self, _: int) -> list[tuple[Any, ...]]:
         return next(self.batches, [])
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self.row
+
 
 class FakeConnection(AbstractContextManager["FakeConnection"]):
     def __init__(self, cursor: FakeCursor) -> None:
@@ -142,6 +148,24 @@ def test_deletes_only_rows_before_the_parameterized_cutoff() -> None:
     ]
 
 
+def test_reads_the_earliest_source_timestamp() -> None:
+    earliest = datetime(2026, 9, 19, 3, tzinfo=UTC)
+    cursor = FakeCursor([], row=(earliest,))
+    connection = FakeConnection(cursor)
+    repository = PostgresArchiveRepository(config(), connect=lambda **_: connection)
+
+    assert repository.earliest_timestamp() == earliest
+    assert cursor.executions == [
+        (
+            sql.SQL("SELECT MIN(timestamp) FROM {}.{}").format(
+                sql.Identifier("gtfs-data"),
+                sql.Identifier("vehicle snapshots"),
+            ),
+            None,
+        )
+    ]
+
+
 def test_writes_zstd_parquet_and_uploads_the_deterministic_key(tmp_path: Path) -> None:
     timestamp = datetime(2026, 9, 19, 14, 2, tzinfo=UTC)
 
@@ -178,10 +202,7 @@ def test_writes_zstd_parquet_and_uploads_the_deterministic_key(tmp_path: Path) -
     assert s3_client.uploaded_bytes is not None
     table = parquet.read_table(pa.BufferReader(s3_client.uploaded_bytes))
     assert bucket == "gtfs-ireland"
-    assert key == (
-        "realtime/ingestion_date=2026-09-19/"
-        "hour_start=2026-09-19T14-00-00Z.parquet"
-    )
+    assert key == ("realtime/ingestion_date=2026-09-19/hour_start=2026-09-19T14-00-00Z.parquet")
     assert extra_args == {"ContentType": "application/vnd.apache.parquet"}
     assert table.column("timestamp").to_pylist() == [timestamp, timestamp]
     assert table.column("header").to_pylist() == ['{"version":"2"}', '{"version":"2"}']

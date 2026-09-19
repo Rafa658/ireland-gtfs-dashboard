@@ -48,8 +48,7 @@ def test_hourly_object_key_uses_local_date_and_utc_instant() -> None:
     )
 
     assert hourly_object_key(window, SAO_PAULO, prefix="realtime") == (
-        "realtime/ingestion_date=2026-09-18/"
-        "hour_start=2026-09-19T02-00-00Z.parquet"
+        "realtime/ingestion_date=2026-09-18/hour_start=2026-09-19T02-00-00Z.parquet"
     )
 
 

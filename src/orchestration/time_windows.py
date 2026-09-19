@@ -60,10 +60,7 @@ def hourly_object_key(window: HourWindow, schedule_timezone: tzinfo, *, prefix: 
 
     local_date = window.start.astimezone(schedule_timezone).date().isoformat()
     utc_start = window.start.astimezone(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    return (
-        f"{normalized_prefix}/ingestion_date={local_date}/"
-        f"hour_start={utc_start}.parquet"
-    )
+    return f"{normalized_prefix}/ingestion_date={local_date}/hour_start={utc_start}.parquet"
 
 
 def retention_cutoff(

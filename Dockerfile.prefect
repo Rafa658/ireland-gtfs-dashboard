@@ -1,0 +1,24 @@
+FROM prefecthq/prefect:3.8.6-python3.13
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PREFECT_HOME=/home/app/.prefect
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install ".[orchestration]" \
+    && groupadd --system app \
+    && useradd --system --gid app --create-home --home-dir /home/app app
+
+COPY --chown=app:app prefect.yaml ./
+COPY --chown=app:app scripts/start-prefect-worker.sh ./scripts/start-prefect-worker.sh
+RUN chmod 0555 ./scripts/start-prefect-worker.sh \
+    && mkdir -p "$PREFECT_HOME" \
+    && chown -R app:app "$PREFECT_HOME"
+
+USER app
+

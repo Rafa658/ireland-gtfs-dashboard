@@ -35,9 +35,7 @@ class PrefectCursorStore:
         try:
             value = datetime.fromisoformat(raw_value)
         except ValueError as error:
-            raise ValueError(
-                f"{EXPORT_CURSOR_VARIABLE} must be an ISO-8601 timestamp"
-            ) from error
+            raise ValueError(f"{EXPORT_CURSOR_VARIABLE} must be an ISO-8601 timestamp") from error
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError(f"{EXPORT_CURSOR_VARIABLE} must include a UTC offset")
         if value.minute or value.second or value.microsecond:
@@ -55,8 +53,10 @@ class PrefectCursorStore:
             overwrite=True,
         )
 
-    def is_retention_enabled(self) -> bool:
-        value = self._variables.get(RETENTION_ENABLED_VARIABLE, default=False)
+    def get_retention_enabled(self) -> bool | None:
+        value = self._variables.get(RETENTION_ENABLED_VARIABLE, default=None)
+        if value is None:
+            return None
         if not isinstance(value, bool):
             raise ValueError(f"{RETENTION_ENABLED_VARIABLE} must be a boolean")
         return value

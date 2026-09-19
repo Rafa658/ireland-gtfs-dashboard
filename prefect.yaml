@@ -1,0 +1,39 @@
+prefect-version: 3.8.6
+name: ireland-gtfs-orchestration
+
+build: null
+push: null
+pull: []
+
+deployments:
+  - name: hourly-export
+    description: Export complete PostgreSQL hours to deterministic MinIO Parquet objects.
+    entrypoint: src/orchestration/flows.py:hourly_export_flow
+    tags:
+      - gtfs
+      - archive
+    concurrency_limit: 1
+    schedules:
+      - cron: "5 * * * *"
+        timezone: America/Sao_Paulo
+        active: true
+    work_pool:
+      name: gtfs-local
+      job_variables:
+        working_dir: /app
+
+  - name: daily-retention
+    description: Delete rows older than 72 hours without crossing the export cursor.
+    entrypoint: src/orchestration/flows.py:retention_flow
+    tags:
+      - gtfs
+      - retention
+    concurrency_limit: 1
+    schedules:
+      - cron: "0 0 * * *"
+        timezone: America/Sao_Paulo
+        active: true
+    work_pool:
+      name: gtfs-local
+      job_variables:
+        working_dir: /app

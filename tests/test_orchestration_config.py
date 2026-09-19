@@ -67,3 +67,21 @@ def test_rejects_non_positive_catchup_limit(monkeypatch: pytest.MonkeyPatch) -> 
 
     with pytest.raises(OrchestrationConfigError, match="ARCHIVE_MAX_CATCHUP_HOURS"):
         OrchestrationConfig.from_env()
+
+
+def test_rejects_an_empty_normalized_archive_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    set_required_env(monkeypatch)
+    monkeypatch.setenv("ARCHIVE_PREFIX", "///")
+
+    with pytest.raises(OrchestrationConfigError, match="ARCHIVE_PREFIX"):
+        OrchestrationConfig.from_env()
+
+
+def test_rejects_an_insecure_failure_webhook(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_required_env(monkeypatch)
+    monkeypatch.setenv("FAILURE_WEBHOOK_URL", "http://alerts.example.com/prefect")
+
+    with pytest.raises(OrchestrationConfigError, match="FAILURE_WEBHOOK_URL"):
+        OrchestrationConfig.from_env()
