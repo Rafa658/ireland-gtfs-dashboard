@@ -109,12 +109,13 @@ def initialize_archive_state(
     initial_start: datetime,
 ) -> InitializationResult:
     cursor = cursor_store.get_cursor()
-    if cursor is None:
+    cursor_was_missing = cursor is None
+    if cursor_was_missing:
         cursor = initial_start
         cursor_store.set_cursor(cursor)
 
     retention_enabled = cursor_store.get_retention_enabled()
-    if retention_enabled is None:
+    if cursor_was_missing or retention_enabled is None:
         earliest = repository.earliest_timestamp()
         retention_enabled = earliest is None or earliest >= initial_start
         cursor_store.set_retention_enabled(retention_enabled)

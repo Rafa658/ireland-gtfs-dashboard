@@ -97,6 +97,21 @@ def test_initialization_preserves_a_manually_disabled_retention_flag() -> None:
     assert cursor_store.retention_enabled is False
 
 
+def test_recreated_cursor_forces_a_fresh_retention_safety_check() -> None:
+    cursor_store = FakeCursorStore(
+        cursor=None,
+        retention_enabled=True,
+    )
+    repository = FakeRepository(earliest=INITIAL_START - timedelta(hours=1))
+    service = ArchiveService(repository, FakeExporter(), cursor_store, SAO_PAULO)
+
+    result = service.initialize(INITIAL_START)
+
+    assert result.retention_enabled is False
+    assert cursor_store.cursor == INITIAL_START
+    assert cursor_store.retention_enabled is False
+
+
 def test_scheduled_export_processes_at_most_24_hours_and_advances_each_window() -> None:
     cursor_store = FakeCursorStore(cursor=INITIAL_START)
     exporter = FakeExporter()
