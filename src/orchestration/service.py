@@ -56,15 +56,11 @@ class ArchiveService:
         self._schedule_timezone = schedule_timezone
 
     def initialize(self, initial_start: datetime) -> InitializationResult:
-        cursor = self._cursor_store.get_cursor()
-        if cursor is None:
-            cursor = initial_start
-            self._cursor_store.set_cursor(cursor)
-
-        earliest = self._repository.earliest_timestamp()
-        retention_enabled = earliest is None or earliest >= initial_start
-        self._cursor_store.set_retention_enabled(retention_enabled)
-        return InitializationResult(cursor=cursor, retention_enabled=retention_enabled)
+        return initialize_archive_state(
+            self._repository,
+            self._cursor_store,
+            initial_start,
+        )
 
     def export_scheduled(self, now: datetime, *, max_hours: int) -> ExportResult:
         cursor = self._cursor_store.get_cursor()
@@ -105,3 +101,19 @@ class ArchiveService:
             raise RuntimeError("export cursor is not initialized")
 
         return self._repository.delete_before(retention_cutoff(now, cursor))
+
+
+def initialize_archive_state(
+    repository: RetentionRepository,
+    cursor_store: CursorStore,
+    initial_start: datetime,
+) -> InitializationResult:
+    cursor = cursor_store.get_cursor()
+    if cursor is None:
+        cursor = initial_start
+        cursor_store.set_cursor(cursor)
+
+    earliest = repository.earliest_timestamp()
+    retention_enabled = earliest is None or earliest >= initial_start
+    cursor_store.set_retention_enabled(retention_enabled)
+    return InitializationResult(cursor=cursor, retention_enabled=retention_enabled)
