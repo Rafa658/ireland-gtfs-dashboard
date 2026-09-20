@@ -1,0 +1,39 @@
+FROM python:3.13-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN python -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install ".[pipelines]"
+
+FROM python:3.13-slim AS runtime
+
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/app \
+    PREFECT_HOME=/app/.prefect \
+    PREFECT_UI_STATIC_DIRECTORY=/app/ui_build
+
+RUN groupadd --system app && useradd --system --gid app --home-dir /app app
+
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+
+# Prefect unpacks the UI bundle at startup and cannot write into site-packages as a non-root user.
+RUN mkdir -p /app/.prefect /app/ui_build && chown -R app:app /app
+
+USER app
+
+# Bake the DuckDB extensions so flow runs never need to download them.
+RUN python -c "import duckdb; c = duckdb.connect(); [c.execute('INSTALL ' + e) for e in ('postgres', 'httpfs')]"
+
+EXPOSE 4200
+
+CMD ["gtfs-pipelines"]

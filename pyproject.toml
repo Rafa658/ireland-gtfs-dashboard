@@ -18,14 +18,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pipelines = [
+    "duckdb>=1.1,<2",
+    "prefect>=3.1,<4",
+    "tzdata>=2024.1",
+]
 dev = [
     "httpx>=0.28,<1",
+    "ireland-gtfs-poller[pipelines]",
     "pytest>=8.3,<9",
     "ruff>=0.9,<1",
 ]
 
 [project.scripts]
 gtfs-poller = "poller.main:run"
+gtfs-pipelines = "pipelines.serve:run"
+gtfs-prefect-healthcheck = "pipelines.healthcheck:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
