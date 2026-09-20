@@ -9,7 +9,7 @@ from prefect.logging import get_logger
 from psycopg import sql
 
 from pipelines.config import PipelineConfig
-from pipelines.windows import object_key, previous_hour_window, retention_cutoff
+from pipelines.windows import hour_windows, object_key, previous_hour_window, retention_cutoff
 
 
 def _logger() -> Logger | LoggerAdapter:
@@ -64,17 +64,17 @@ def _create_object_store_secret(
     )
 
 
-@flow(name="export-hourly-snapshots")
-def export_hourly_snapshots(run_at: datetime | None = None) -> dict[str, object]:
-    """Export the previous full local hour of snapshots to MinIO as Parquet.
+def _export_window(
+    connection: duckdb.DuckDBPyConnection,
+    config: PipelineConfig,
+    window_start: datetime,
+    window_end: datetime,
+    logger: Logger | LoggerAdapter,
+) -> tuple[int, str | None]:
+    """Export one hour. Returns the row count and the object written, if any.
 
-    ``run_at`` defaults to now; pass an explicit instant to re-export an earlier hour.
+    Shared by the scheduled export and the backfill so both produce identical objects.
     """
-    logger = _logger()
-    config = PipelineConfig.from_env()
-
-    now = run_at or datetime.now(tz=UTC)
-    window_start, window_end = previous_hour_window(now, config.tzinfo)
     key = object_key(config.archive_prefix, window_start, config.tzinfo)
     target = f"s3://{config.minio_bucket}/{key}"
 
@@ -87,27 +87,106 @@ def export_hourly_snapshots(run_at: datetime | None = None) -> dict[str, object]
         f'AND "timestamp" < {_timestamp_literal(window_end)}'
     )
 
+    (row_count,) = connection.execute(
+        f"SELECT count(*) FROM {relation} WHERE {predicate}"
+    ).fetchone()
+
+    if row_count == 0:
+        logger.warning("No snapshots found for window %s -> %s", window_start, window_end)
+        return 0, None
+
+    connection.execute(
+        f"""
+        COPY (
+            SELECT * FROM {relation}
+            WHERE {predicate}
+            ORDER BY "timestamp"
+        ) TO {_quote_literal(target)} (FORMAT parquet, COMPRESSION zstd)
+        """
+    )
+    logger.info("Exported %s rows to %s", row_count, target)
+    return row_count, target
+
+
+@flow(name="export-hourly-snapshots")
+def export_hourly_snapshots(run_at: datetime | None = None) -> dict[str, object]:
+    """Export the previous full local hour of snapshots to MinIO as Parquet.
+
+    ``run_at`` defaults to now; pass an explicit instant to re-export an earlier hour.
+    """
+    logger = _logger()
+    config = PipelineConfig.from_env()
+
+    now = run_at or datetime.now(tz=UTC)
+    window_start, window_end = previous_hour_window(now, config.tzinfo)
+
     with _duckdb_connection(config) as connection:
-        (row_count,) = connection.execute(
-            f"SELECT count(*) FROM {relation} WHERE {predicate}"
-        ).fetchone()
+        row_count, target = _export_window(connection, config, window_start, window_end, logger)
 
-        if row_count == 0:
-            logger.warning("No snapshots found for window %s -> %s", window_start, window_end)
-            return {"rows": 0, "target": None, "window_start": window_start.isoformat()}
+    return {"rows": row_count, "target": target, "window_start": window_start.isoformat()}
 
-        connection.execute(
-            f"""
-            COPY (
-                SELECT * FROM {relation}
-                WHERE {predicate}
-                ORDER BY "timestamp"
-            ) TO {_quote_literal(target)} (FORMAT parquet, COMPRESSION zstd)
-            """
+
+@flow(name="backfill-hourly-snapshots")
+def backfill_hourly_snapshots(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    max_hours: int | None = None,
+) -> dict[str, object]:
+    """Re-export every whole hour in a range, one object per hour.
+
+    Defaults to ``ARCHIVE_INITIAL_START`` through the last complete hour. Each hour is
+    written exactly as the scheduled export would, so reruns are idempotent and simply
+    overwrite. ``max_hours`` caps a single run and defaults to ``ARCHIVE_MAX_CATCHUP_HOURS``;
+    pass ``0`` to process the whole range at once. When a run is capped it returns
+    ``next_start``, which must be passed as ``start`` to continue.
+    """
+    logger = _logger()
+    config = PipelineConfig.from_env()
+
+    window_start = start or config.archive_initial_start
+    if window_start is None:
+        raise ValueError("Set ARCHIVE_INITIAL_START or pass an explicit start")
+
+    limit = max_hours if max_hours is not None else config.archive_max_catchup_hours
+    windows = hour_windows(window_start, end or datetime.now(tz=UTC), config.tzinfo)
+
+    total = len(windows)
+    if limit:
+        windows = windows[:limit]
+
+    remaining = total - len(windows)
+    next_start = windows[-1][1].isoformat() if remaining and windows else None
+    logger.info("Backfilling %s of %s hour(s) from %s", len(windows), total, window_start)
+
+    exported_rows = 0
+    written: list[str] = []
+    empty_hours = 0
+
+    with _duckdb_connection(config) as connection:
+        for start_at, end_at in windows:
+            rows, target = _export_window(connection, config, start_at, end_at, logger)
+            if target is None:
+                empty_hours += 1
+                continue
+            exported_rows += rows
+            written.append(target)
+
+    if remaining:
+        logger.warning(
+            "Stopped after %s hour(s); %s remaining. Continue with start=%s or raise max_hours.",
+            len(windows),
+            remaining,
+            next_start,
         )
 
-    logger.info("Exported %s rows to %s", row_count, target)
-    return {"rows": row_count, "target": target, "window_start": window_start.isoformat()}
+    return {
+        "hours_processed": len(windows),
+        "hours_remaining": remaining,
+        "hours_empty": empty_hours,
+        "objects_written": len(written),
+        "rows": exported_rows,
+        "next_start": next_start,
+    }
 
 
 @flow(name="enforce-retention")

@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -42,6 +43,30 @@ def _positive_int(name: str, *, default: int | None = None, maximum: int | None 
     return value
 
 
+def _boolean(name: str, *, default: bool) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    if value not in {"true", "false"}:
+        raise ConfigError(f"{name} must be true or false")
+    return value == "true"
+
+
+def _optional_datetime(name: str) -> datetime | None:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value or raw_value == "CHANGE_ME":
+        return None
+    try:
+        value = datetime.fromisoformat(raw_value)
+    except ValueError as error:
+        raise ConfigError(
+            f"{name} must be an ISO 8601 timestamp, e.g. 2026-09-19T00:00:00-03:00"
+        ) from error
+    if value.tzinfo is None:
+        raise ConfigError(f"{name} must include a UTC offset, e.g. 2026-09-19T00:00:00-03:00")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class PipelineConfig:
     postgres_host: str
@@ -61,6 +86,8 @@ class PipelineConfig:
     minio_region: str
     archive_prefix: str
     archive_timezone: str
+    archive_initial_start: datetime | None
+    archive_max_catchup_hours: int
     retention_days: int
 
     @classmethod
@@ -98,6 +125,8 @@ class PipelineConfig:
             minio_region=_optional("MINIO_REGION", "us-east-1"),
             archive_prefix=_required("ARCHIVE_PREFIX"),
             archive_timezone=archive_timezone,
+            archive_initial_start=_optional_datetime("ARCHIVE_INITIAL_START"),
+            archive_max_catchup_hours=_positive_int("ARCHIVE_MAX_CATCHUP_HOURS", default=24),
             retention_days=_positive_int("RETENTION_DAYS", default=DEFAULT_RETENTION_DAYS),
         )
 

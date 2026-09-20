@@ -11,6 +11,7 @@ from pipelines.flows import (
     _quote_identifier,
     _quote_literal,
     _timestamp_literal,
+    backfill_hourly_snapshots,
     enforce_retention,
     export_hourly_snapshots,
 )
@@ -39,16 +40,24 @@ PIPELINE_ENV = {
 
 
 class FakeDuckDBConnection:
-    def __init__(self, row_count: int) -> None:
+    def __init__(self, row_count: int | list[int]) -> None:
         self.statements: list[str] = []
-        self._row_count = row_count
+        self._counts = [row_count] if isinstance(row_count, int) else list(row_count)
+        self._index = 0
 
     def execute(self, statement: str) -> "FakeDuckDBConnection":
         self.statements.append(" ".join(statement.split()))
         return self
 
     def fetchone(self) -> tuple[int]:
-        return (self._row_count,)
+        # Counts are consumed in order, one per exported window.
+        value = self._counts[min(self._index, len(self._counts) - 1)]
+        self._index += 1
+        return (value,)
+
+    @property
+    def copy_statements(self) -> list[str]:
+        return [s for s in self.statements if s.startswith("COPY (")]
 
     def __enter__(self) -> "FakeDuckDBConnection":
         return self
@@ -170,3 +179,131 @@ def test_retention_deletes_rows_older_than_three_local_days(
     statement, parameters = connection.cursor_instance.executed[0]
     assert parameters == (cutoff,)
     assert statement.as_string(None) == 'DELETE FROM "gtfs"."snapshots" WHERE "timestamp" < %s'
+
+
+def test_backfill_exports_every_whole_hour_in_the_range(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = FakeDuckDBConnection(row_count=10)
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+
+    result = backfill_hourly_snapshots.fn(
+        start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
+        end=datetime(2026, 9, 19, 3, 0, tzinfo=SAO_PAULO),
+        max_hours=0,
+    )
+
+    assert result == {
+        "hours_processed": 3,
+        "hours_remaining": 0,
+        "hours_empty": 0,
+        "objects_written": 3,
+        "rows": 30,
+        "next_start": None,
+    }
+
+    targets = [s.split(" TO ")[1] for s in connection.copy_statements]
+    assert targets == [
+        "'s3://gtfs-ireland/realtime/ingestion_date=2026-09-19"
+        f"/snapshots_20260919T0{h}.parquet' (FORMAT parquet, COMPRESSION zstd)"
+        for h in (0, 1, 2)
+    ]
+
+
+def test_backfill_defaults_to_archive_initial_start(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ARCHIVE_INITIAL_START", "2026-09-19T00:00:00-03:00")
+    connection = FakeDuckDBConnection(row_count=1)
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+
+    result = backfill_hourly_snapshots.fn(
+        end=datetime(2026, 9, 19, 2, 0, tzinfo=SAO_PAULO), max_hours=0
+    )
+
+    assert result["hours_processed"] == 2
+    first_copy = connection.copy_statements[0]
+    assert "\"timestamp\" >= TIMESTAMPTZ '2026-09-19T00:00:00-03:00'" in first_copy
+
+
+def test_backfill_skips_empty_hours_without_writing_objects(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = FakeDuckDBConnection(row_count=[5, 0, 7])
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+
+    result = backfill_hourly_snapshots.fn(
+        start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
+        end=datetime(2026, 9, 19, 3, 0, tzinfo=SAO_PAULO),
+        max_hours=0,
+    )
+
+    assert result["hours_empty"] == 1
+    assert result["objects_written"] == 2
+    assert result["rows"] == 12
+    assert len(connection.copy_statements) == 2
+
+
+def test_backfill_caps_a_run_and_reports_the_remainder(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = FakeDuckDBConnection(row_count=1)
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+
+    result = backfill_hourly_snapshots.fn(
+        start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
+        end=datetime(2026, 9, 19, 10, 0, tzinfo=SAO_PAULO),
+        max_hours=4,
+    )
+
+    assert result["hours_processed"] == 4
+    assert result["hours_remaining"] == 6
+    assert result["next_start"] == "2026-09-19T04:00:00-03:00"
+    assert "snapshots_20260919T00.parquet" in connection.copy_statements[0]
+
+
+def test_capped_runs_resumed_via_next_start_cover_every_hour_exactly_once(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chaining runs through next_start must tile the range with no gap or overlap."""
+    end = datetime(2026, 9, 19, 10, 0, tzinfo=SAO_PAULO)
+    cursor: datetime | None = datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO)
+    written: list[str] = []
+
+    while cursor is not None:
+        connection = FakeDuckDBConnection(row_count=1)
+        monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _c, _f=connection: _f)
+        result = backfill_hourly_snapshots.fn(start=cursor, end=end, max_hours=3)
+        written += [s.split("/")[-1].split("'")[0] for s in connection.copy_statements]
+        nxt = result["next_start"]
+        cursor = datetime.fromisoformat(nxt) if nxt else None
+
+    expected = [f"snapshots_20260919T{h:02d}.parquet" for h in range(10)]
+    assert written == expected
+    assert len(written) == len(set(written))
+
+
+def test_backfill_requires_a_start(pipeline_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ARCHIVE_INITIAL_START", raising=False)
+
+    with pytest.raises(ValueError, match="ARCHIVE_INITIAL_START"):
+        backfill_hourly_snapshots.fn(end=datetime(2026, 9, 19, 3, 0, tzinfo=SAO_PAULO))
+
+
+def test_backfill_hour_matches_the_scheduled_export_for_the_same_hour(
+    pipeline_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A backfilled hour must write the same object with the same predicate."""
+    scheduled = FakeDuckDBConnection(row_count=9)
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: scheduled)
+    export_hourly_snapshots.fn(run_at=datetime(2026, 9, 19, 19, 5, tzinfo=SAO_PAULO))
+
+    backfilled = FakeDuckDBConnection(row_count=9)
+    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: backfilled)
+    backfill_hourly_snapshots.fn(
+        start=datetime(2026, 9, 19, 18, 0, tzinfo=SAO_PAULO),
+        end=datetime(2026, 9, 19, 19, 0, tzinfo=SAO_PAULO),
+        max_hours=0,
+    )
+
+    assert scheduled.copy_statements == backfilled.copy_statements

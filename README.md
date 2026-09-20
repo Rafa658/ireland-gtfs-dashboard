@@ -192,8 +192,36 @@ services, and `make prefect-down` stops them.
 deployments and executes their runs in-process, so no worker or work pool is required. Restarting
 either container re-registers and resumes the schedules.
 
-### Backfilling an hour
+### Backfilling
 
-Both flows accept an optional `run_at` parameter and derive their window from it. To re-export a
-missed hour, start a custom run from the UI with `run_at` set to any instant inside the hour
-*after* the one you want, matching the normal `:05` behavior.
+Both scheduled flows accept an optional `run_at` parameter and derive their window from it. To
+re-export a single missed hour, start a custom run from the UI with `run_at` set to any instant
+inside the hour *after* the one you want, matching the normal `:05` behavior.
+
+To reprocess a whole range retroactively, run the backfill inside the flows container. It walks the
+range in one-hour steps and writes each hour exactly as the scheduled export would, so it is
+idempotent and safe to repeat:
+
+```bash
+docker compose exec prefect-flows gtfs-backfill --max-hours 0
+```
+
+With no arguments it covers `ARCHIVE_INITIAL_START` through the last complete hour. Hours with no
+rows are skipped rather than written as empty files. It runs as a tracked flow run, so its logs
+appear in the UI alongside the scheduled ones.
+
+| Option | Meaning |
+| --- | --- |
+| `--start` | ISO 8601 with UTC offset. Defaults to `ARCHIVE_INITIAL_START`. Floored to the hour. |
+| `--end` | ISO 8601 exclusive end. Defaults to now, so the in-progress hour is never written. |
+| `--max-hours` | Hours to process in one run. Defaults to `ARCHIVE_MAX_CATCHUP_HOURS`. `0` means no cap. |
+
+When a run is capped it stops early and reports `next_start`. Pass that value to `--start` to
+continue, since re-running the same command would otherwise repeat the same hours:
+
+```bash
+docker compose exec prefect-flows gtfs-backfill --start 2026-09-20T00:00:00-03:00
+```
+
+Backfilling further back than `RETENTION_DAYS` has no effect, because the retention flow has
+already deleted those rows from Postgres.

@@ -28,3 +28,20 @@ def object_key(prefix: str, window_start: datetime, zone: tzinfo) -> str:
         f"/ingestion_date={local_start:%Y-%m-%d}"
         f"/snapshots_{local_start:%Y%m%dT%H}.parquet"
     )
+
+
+def hour_windows(start: datetime, end: datetime, zone: tzinfo) -> list[tuple[datetime, datetime]]:
+    """Return consecutive one-hour windows covering ``start`` up to ``end``.
+
+    ``start`` is floored to its hour so the windows align with the scheduled export.
+    ``end`` is exclusive, so a partially elapsed final hour is never emitted.
+    """
+    cursor = _as_aware(start).astimezone(zone).replace(minute=0, second=0, microsecond=0)
+    limit = _as_aware(end).astimezone(zone)
+
+    windows: list[tuple[datetime, datetime]] = []
+    while cursor + timedelta(hours=1) <= limit:
+        nxt = cursor + timedelta(hours=1)
+        windows.append((cursor, nxt))
+        cursor = nxt
+    return windows
