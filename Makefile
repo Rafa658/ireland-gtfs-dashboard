@@ -17,7 +17,7 @@ $(BIN)/python:
 
 install: $(BIN)/python
 	$(BIN)/python -m ensurepip --upgrade
-	$(BIN)/python -m pip install -e ".[dev]"
+	$(BIN)/python -m pip install -e ".[dev,pipelines]"
 
 lint:
 	$(BIN)/ruff check .
