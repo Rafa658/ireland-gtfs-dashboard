@@ -7,7 +7,7 @@ name = "ireland-gtfs-poller"
 version = "0.1.0"
 description = "Poll GTFS JSON data and persist snapshots to PostgreSQL."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "fastapi>=0.115,<1",
     "loguru>=0.7,<1",
