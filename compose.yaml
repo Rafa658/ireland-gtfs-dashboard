@@ -21,3 +21,51 @@ services:
       start_period: 10s
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  prefect-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.prefect
+    command:
+      ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+    env_file:
+      - .env
+    environment:
+      PREFECT_SERVER_API_HOST: "0.0.0.0"
+      PREFECT_SERVER_API_PORT: "4200"
+      PREFECT_UI_API_URL: "http://${PREFECT_PRIVATE_IP:?set PREFECT_PRIVATE_IP in .env to the address you browse from}:${PREFECT_PORT:-4200}/api"
+    ports:
+      - "${PREFECT_PORT:-4200}:4200"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "gtfs-prefect-healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - gtfs-shared
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prefect-flows:
+    build:
+      context: .
+      dockerfile: Dockerfile.prefect
+    env_file:
+      - .env
+    environment:
+      PREFECT_API_URL: "http://prefect-server:4200/api"
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - gtfs-shared
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  gtfs-shared:
+    external: true
+    name: ${GTFS_SHARED_NETWORK:-gtfs-shared}

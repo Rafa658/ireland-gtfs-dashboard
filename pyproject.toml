@@ -7,7 +7,7 @@ name = "ireland-gtfs-poller"
 version = "0.1.0"
 description = "Poll GTFS JSON data and persist snapshots to PostgreSQL."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13,<3.15"
 dependencies = [
     "fastapi>=0.115,<1",
     "loguru>=0.7,<1",
@@ -18,6 +18,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pipelines = [
+    "duckdb>=1.1,<2",
+    "prefect>=3.1,<4",
+    "tzdata>=2024.1",
+]
 dev = [
     "httpx>=0.28,<1",
     "pytest>=8.3,<9",
@@ -26,6 +31,9 @@ dev = [
 
 [project.scripts]
 gtfs-poller = "poller.main:run"
+gtfs-pipelines = "pipelines.serve:run"
+gtfs-backfill = "pipelines.backfill:run"
+gtfs-prefect-healthcheck = "pipelines.healthcheck:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

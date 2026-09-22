@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV := .venv
 BIN := $(VENV)/bin
 
-.PHONY: init install lint test run build up down
+.PHONY: init install lint test run build up down prefect-build prefect-up prefect-down prefect-logs
 
 init:
 	@if [ -f .env ]; then \
@@ -17,7 +17,7 @@ $(BIN)/python:
 
 install: $(BIN)/python
 	$(BIN)/python -m ensurepip --upgrade
-	$(BIN)/python -m pip install -e ".[dev]"
+	$(BIN)/python -m pip install -e ".[dev,pipelines]"
 
 lint:
 	$(BIN)/ruff check .
@@ -37,3 +37,18 @@ up:
 
 down:
 	docker compose down
+
+prefect-build:
+	docker compose build prefect-server prefect-flows
+
+prefect-up:
+	docker compose up -d prefect-server prefect-flows
+
+prefect-down:
+	docker compose down prefect-server prefect-flows
+
+prefect-logs:
+	docker compose logs -f prefect-server prefect-flows
+
+network-up:
+	docker network create gtfs-shared
