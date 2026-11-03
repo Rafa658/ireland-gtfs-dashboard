@@ -10,3 +10,9 @@ build/
 dist/
 *.key
 *.pem
+*.duckdb
+*.duckdb.wal
+target/
+logs/
+dbt_internal_packages/
+.user.yml
