@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: stg_gtfs_events__api
+    description: Typed and renamed view over unfolded_gtfs_events__api. No filtering or business logic.
+    columns:
+      - name: snapshot_timestamp
+        description: Time the feed snapshot was captured by the poller.
+      - name: header
+        description: Feed header JSON of the snapshot.
+      - name: entity_id
+        description: Entity id within the snapshot; not stable across snapshots.
+      - name: trip_id
+        description: GTFS trip identifier.
+      - name: route_id
+        description: GTFS route identifier.
+      - name: trip_start_date
+        description: Scheduled start date of the trip.
+      - name: trip_start_time
+        description: Scheduled start time as HH:MM:SS text; kept as text because it may exceed 24:00:00.
+      - name: direction_id
+        description: Direction of travel (0 or 1).
+      - name: trip_schedule_relationship
+        description: Relationship of the trip to the static schedule.
+      - name: trip_update_timestamp
+        description: When the trip's real-time data was produced.
+      - name: stop_time_update
+        description: Array of structs with the predicted arrival/departure for each upcoming stop.
+      - name: ingestion_date
+        description: Hive partition date of the source Parquet file.
+
+  - name: stg_gtfs_events_stops__api
+    description: Typed and renamed view over unfolded_gtfs_events_stops__api. No filtering or business logic.
+    columns:
+      - name: snapshot_timestamp
+        description: Time the feed snapshot was captured by the poller.
+      - name: trip_id
+        description: GTFS trip identifier.
+      - name: route_id
+        description: GTFS route identifier.
+      - name: trip_start_date
+        description: Scheduled start date of the trip.
+      - name: trip_start_time
+        description: Scheduled start time of the trip.
+      - name: stop_id
+        description: GTFS stop identifier.
+      - name: stop_sequence
+        description: Position of the stop within the trip.
+      - name: schedule_relationship
+        description: Relationship of this stop to the schedule.
+      - name: arrival_delay_seconds
+        description: Predicted arrival delay in seconds (negative is early).
+      - name: arrival_time
+        description: Predicted arrival time.
+      - name: arrival_uncertainty_seconds
+        description: Uncertainty of the arrival prediction in seconds.
+      - name: departure_delay_seconds
+        description: Predicted departure delay in seconds (negative is early).
+      - name: departure_time
+        description: Predicted departure time.
+      - name: departure_uncertainty_seconds
+        description: Uncertainty of the departure prediction in seconds.
+      - name: ingestion_date
+        description: Hive partition date of the source Parquet file.
