@@ -1,0 +1,68 @@
+version: 2
+
+models:
+  - name: unfolded_gtfs_events__api
+    description: >-
+      One row per GTFS-realtime entity (trip update). The raw `entity` JSON array is parsed once
+      into typed structs (see macro `trip_update_schema`) and exploded. Append-only, incremental by ingestion_date.
+    columns:
+      - name: timestamp
+        description: Time the feed snapshot was captured by the poller.
+      - name: header
+        description: Feed header JSON of the snapshot, repeated on every entity row.
+      - name: entity_id
+        description: Entity id within the snapshot (e.g. T1); not stable across snapshots.
+      - name: trip_id
+        description: GTFS trip identifier.
+      - name: route_id
+        description: GTFS route identifier.
+      - name: start_date
+        description: Scheduled start date of the trip, as YYYYMMDD text.
+      - name: start_time
+        description: Scheduled start time as HH:MM:SS text; may exceed 24:00:00 for trips past midnight.
+      - name: direction_id
+        description: Direction of travel (0 or 1), as text.
+      - name: trip_schedule_relationship
+        description: Relationship of the trip to the static schedule (e.g. SCHEDULED).
+      - name: trip_update_timestamp
+        description: Epoch seconds of when the trip's real-time data was produced, as text.
+      - name: stop_time_update
+        description: Array of structs with the predicted arrival/departure for each upcoming stop of the trip.
+      - name: ingestion_date
+        description: Hive partition date (ingestion_date=YYYY-mm-dd) of the source Parquet file.
+
+  - name: unfolded_gtfs_events_stops__api
+    description: >-
+      One row per stop time update of a trip update, exploded from `stop_time_update` of
+      unfolded_gtfs_events__api. Append-only, incremental by ingestion_date.
+    columns:
+      - name: timestamp
+        description: Time the feed snapshot was captured by the poller.
+      - name: trip_id
+        description: GTFS trip identifier.
+      - name: route_id
+        description: GTFS route identifier.
+      - name: start_date
+        description: Scheduled start date of the trip, as YYYYMMDD text.
+      - name: start_time
+        description: Scheduled start time of the trip as HH:MM:SS text.
+      - name: stop_id
+        description: GTFS stop identifier.
+      - name: stop_sequence
+        description: Position of the stop within the trip, as text.
+      - name: schedule_relationship
+        description: Relationship of this stop to the schedule (e.g. SCHEDULED, SKIPPED, NO_DATA).
+      - name: arrival_delay
+        description: Predicted arrival delay in seconds (negative is early), as text.
+      - name: arrival_time
+        description: Predicted arrival time as epoch seconds, as text; only present for some updates.
+      - name: arrival_uncertainty
+        description: Uncertainty of the arrival prediction in seconds, as text.
+      - name: departure_delay
+        description: Predicted departure delay in seconds (negative is early), as text.
+      - name: departure_time
+        description: Predicted departure time as epoch seconds, as text; only present for some updates.
+      - name: departure_uncertainty
+        description: Uncertainty of the departure prediction in seconds, as text.
+      - name: ingestion_date
+        description: Hive partition date of the source Parquet file.
