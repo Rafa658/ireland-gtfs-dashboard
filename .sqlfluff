@@ -1,0 +1,6 @@
+[sqlfluff]
+templater = dbt
+encoding = utf-8
+dialect = duckdb
+# RF02 false-positives on `select max(...) from {{ this }}` incremental filters
+exclude_rules = RF02

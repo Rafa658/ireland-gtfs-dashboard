@@ -2,7 +2,7 @@ PYTHON ?= python3
 VENV := .venv
 BIN := $(VENV)/bin
 
-.PHONY: init install lint test run build up down prefect-build prefect-up prefect-down prefect-logs
+.PHONY: init install lint lint-fix test run build up down prefect-build prefect-up prefect-down prefect-logs
 
 init:
 	@if [ -f .env ]; then \
@@ -20,8 +20,10 @@ install: $(BIN)/python
 	$(BIN)/python -m pip install -e ".[dev,pipelines]"
 
 lint:
-	$(BIN)/ruff check .
-	$(BIN)/ruff format --check .
+	set -a; . ./.env; set +a; poetry run sqlfluff lint models
+
+lint-fix:
+	set -a; . ./.env; set +a; poetry run sqlfluff fix models
 
 test:
 	$(BIN)/python -m pytest -q
