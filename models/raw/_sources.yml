@@ -1,0 +1,11 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw GTFS-realtime Parquet archive stored in MinIO.
+    tables:
+      - name: raw_gtfs_events__api
+        description: Hive-partitioned (ingestion_date=YYYY-mm-dd) Parquet files.
+        meta:
+          external_location: >-
+            read_parquet('s3://gtfs-ireland/realtime/ingestion_date=**/*.parquet', hive_partitioning = true)

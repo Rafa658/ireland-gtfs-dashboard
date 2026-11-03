@@ -1,0 +1,24 @@
+name: ireland_gtfs
+version: "0.1.0"
+config-version: 2
+profile: ireland_gtfs
+
+model-paths: ["models"]
+
+models:
+  ireland_gtfs:
+    raw:
+      +materialized: view
+      +schema: raw
+    unfolded:
+      +materialized: table
+      +schema: unfolded
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
+    bi:
+      +materialized: table
+      +schema: bi
