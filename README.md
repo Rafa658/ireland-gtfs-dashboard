@@ -1,18 +1,22 @@
 # Ireland GTFS Poller
 
-A small Python service that polls the National Transport Authority GTFS JSON endpoint every
-120 seconds and appends each successful response to PostgreSQL.
+Prefect flows that poll the National Transport Authority GTFS JSON endpoint every 120 seconds,
+append each successful response to PostgreSQL, archive it to MinIO, enforce retention, and run
+the production dbt project. All flow entrypoints live in `src/dags`; a single runner serves them
+against the Prefect server.
 
 ## Behavior
 
-- Calls the fixed endpoint
+- `poll-gtfs` calls the fixed endpoint
   `https://api.nationaltransport.ie/gtfsr/v2/gtfsr?format=json` with an `x-api-key` header.
-- Polls immediately at startup, then waits the configured interval after each completed attempt.
+- Each run stores one snapshot; the deployment schedules a run every `POLL_INTERVAL_SECONDS`.
 - Requires a top-level `header` key. The `entity` key is optional.
 - Stores one row per successful poll using a UTC ingestion timestamp.
 - Creates the configured schema and table when missing, but never modifies existing objects.
-- Logs runtime failures as structured JSON and retries on the next polling interval.
-- Exposes only `GET /health`.
+- A failed poll fails its Prefect run (no retries); the next scheduled run tries again. A run
+  still going when the next slot arrives cancels that new slot, and a slot that starts a full
+  interval late is skipped (state `Skipped`) instead of ingested as a stale snapshot.
+- There is no HTTP endpoint; monitor the `poll-gtfs` runs in the Prefect UI.
 
 The auto-created table has exactly this shape:
 
@@ -29,15 +33,15 @@ JSONB `null`.
 
 ## Setup
 
-Requirements: Python 3.13+, GNU Make, and optionally Docker with Docker Compose.
+Requirements: Python 3.14, GNU Make, Poetry (for the dbt flow), and Docker with Docker Compose
+for the Prefect server.
 
 ```bash
 make init
 ```
 
-Edit `.env` and replace all `CHANGE_ME` values. `POSTGRES_HOST` must be reachable from wherever
-the application runs. For Docker Desktop, a database on the host can commonly be reached through
-`host.docker.internal`; for another container, use its shared-network service name.
+Edit `.env` and replace all `CHANGE_ME` values. `POSTGRES_HOST` and `MINIO_ENDPOINT_URL` must be
+reachable from the machine running the flows runner.
 
 ## Local development
 
@@ -45,45 +49,12 @@ the application runs. For Docker Desktop, a database on the host can commonly be
 make install
 make lint
 make test
-make run
+make run   # starts the flows runner against PREFECT_API_URL
 ```
-
-## Docker
-
-```bash
-make build
-make up
-```
-
-Stop the service with:
-
-```bash
-make down
-```
-
-Compose maps the configured `APP_PORT` and restarts the container unless it is explicitly stopped.
-
-## Health contract
-
-`GET /health` returns:
-
-```json
-{
-  "status": "healthy",
-  "last_attempt_at": "2026-09-19T03:39:00+00:00",
-  "last_success_at": "2026-09-19T03:39:00+00:00"
-}
-```
-
-- `200 starting`: no polling cycle has completed yet.
-- `200 healthy`: the latest cycle completed and was persisted.
-- `503 unhealthy`: the latest setup, API, validation, or insert operation failed.
-
-The endpoint never returns upstream payloads, credentials, or exception details.
 
 ## Prefect pipelines
 
-A separate Prefect 3 stack ships two scheduled flows that operate on the same table. DuckDB
+The Prefect 3 stack ships scheduled flows that operate on the same table. DuckDB
 reads Postgres directly (`postgres` extension) and writes Parquet straight to MinIO
 (`httpfs` extension), so no data is staged on local disk.
 
@@ -91,6 +62,11 @@ reads Postgres directly (`postgres` extension) and writes Parquet straight to Mi
 | --- | --- | --- |
 | `export-hourly-snapshots/hourly-parquet-export` | `5 * * * *` | Exports the whole preceding hour, every hour. A run at 05:05 exports `04:00 <= timestamp < 05:00`; a run at 19:05 exports `18:00 <= timestamp < 19:00`. |
 | `enforce-retention/daily-retention` | `30 1 * * *` | Deletes rows older than `RETENTION_DAYS` whole local days. |
+| `poll-gtfs/gtfs-poll` | every `POLL_INTERVAL_SECONDS` | One snapshot per run (see Behavior). |
+| `dbt-daily-run/dbt-daily-run` | `0 4 * * *` (`America/Sao_Paulo`) | Runs `poetry run dbt run -t prod` from the repository root. |
+
+Export and retention share the `gtfs-archive` global concurrency limit (1), which the runner
+creates at startup, so they never overlap. Polling and dbt are not blocked by them.
 
 Exports land at:
 
@@ -185,12 +161,32 @@ make prefect-build
 make prefect-up
 ```
 
-The UI is then served on `http://<PREFECT_PRIVATE_IP>:4200`. `make prefect-logs` tails both
-services, and `make prefect-down` stops them.
+The UI is then served on `http://<PREFECT_PRIVATE_IP>:4200`. `make prefect-logs` tails the
+server, and `make prefect-down` stops it. The container runs only the API and UI.
 
-`prefect-server` runs the API and UI. `prefect-flows` runs `prefect.serve`, which registers both
-deployments and executes their runs in-process, so no worker or work pool is required. Restarting
-either container re-registers and resumes the schedules.
+### Flows runner
+
+One host process runs `gtfs-pipelines` (`src/dags/serve.py`). It registers all four deployments
+and executes their runs in-process, so no worker or work pool is required. It reads `.env` from
+its working directory and calls the dbt flow through Poetry, so run it from the repository root
+on a machine where `poetry run dbt run -t prod` works. Restarting it re-registers the schedules.
+
+For a checkout at `~/ireland-gtfs-dashboard` with Poetry at `~/.local/bin/poetry`:
+
+```bash
+poetry install --extras pipelines --no-root
+mkdir -p ~/.config/systemd/user
+cp deploy/gtfs-flows.service ~/.config/systemd/user/
+sudo loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now gtfs-flows.service
+```
+
+Lingering keeps the runner active after logout and starts it at boot. The service connects to
+`http://127.0.0.1:4200/api`; use `journalctl --user -u gtfs-flows.service` for runner logs. Set
+`POSTGRES_HOST` and `MINIO_ENDPOINT_URL` to addresses reachable from the host, since Docker-only
+names such as `minio` do not resolve there. Stop any previous poller container or runner before
+starting this one so two writers never poll at once.
 
 ### Backfilling
 
@@ -198,12 +194,12 @@ Both scheduled flows accept an optional `run_at` parameter and derive their wind
 re-export a single missed hour, start a custom run from the UI with `run_at` set to any instant
 inside the hour *after* the one you want, matching the normal `:05` behavior.
 
-To reprocess a whole range retroactively, run the backfill inside the flows container. It walks the
+To reprocess a whole range retroactively, run the backfill from the repository root on the runner host. It walks the
 range in one-hour steps and writes each hour exactly as the scheduled export would, so it is
 idempotent and safe to repeat:
 
 ```bash
-docker compose exec prefect-flows gtfs-backfill --max-hours 0
+poetry run gtfs-backfill --max-hours 0
 ```
 
 With no arguments it covers `ARCHIVE_INITIAL_START` through the last complete hour. Hours with no
@@ -220,7 +216,7 @@ When a run is capped it stops early and reports `next_start`. Pass that value to
 continue, since re-running the same command would otherwise repeat the same hours:
 
 ```bash
-docker compose exec prefect-flows gtfs-backfill --start 2026-09-20T00:00:00-03:00
+poetry run gtfs-backfill --start 2026-09-20T00:00:00-03:00
 ```
 
 Backfilling further back than `RETENTION_DAYS` has no effect, because the retention flow has

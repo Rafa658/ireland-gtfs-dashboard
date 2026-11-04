@@ -1,0 +1,143 @@
+import subprocess
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
+
+import pytest
+from prefect.client.schemas.objects import ConcurrencyLimitStrategy
+from prefect.states import Completed
+
+from dags import poll_gtfs as poll_module
+from dags.dbt import PROJECT_ROOT, dbt_daily_run
+from dags.poll_gtfs import poll_gtfs
+from dags.serve import build_deployments
+from poller.api_client import ApiPayload
+
+POLL_ENV = {
+    "API_KEY": "secret-key",
+    "POLL_INTERVAL_SECONDS": "120",
+    "API_TIMEOUT_SECONDS": "30",
+    "POSTGRES_CONNECT_TIMEOUT_SECONDS": "10",
+    "POSTGRES_HOST": "db.internal",
+    "POSTGRES_PORT": "5432",
+    "POSTGRES_DB": "gtfs",
+    "POSTGRES_USER": "gtfs",
+    "POSTGRES_PASSWORD": "secret",
+    "POSTGRES_SCHEMA": "gtfs",
+    "POSTGRES_TABLE": "snapshots",
+    "POSTGRES_SSLMODE": "prefer",
+}
+
+
+@pytest.fixture
+def poll_env(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    for key, value in POLL_ENV.items():
+        monkeypatch.setenv(key, value)
+    logger = MagicMock()
+    monkeypatch.setattr(poll_module, "get_run_logger", lambda: logger)
+    monkeypatch.setattr(poll_module, "_lateness_seconds", lambda: 0.5)
+    return logger
+
+
+def stub_poll_dependencies(
+    monkeypatch: pytest.MonkeyPatch, payload: ApiPayload | Exception
+) -> MagicMock:
+    repository = MagicMock()
+    client = MagicMock()
+    if isinstance(payload, Exception):
+        client.fetch.side_effect = payload
+    else:
+        client.fetch.return_value = payload
+    monkeypatch.setattr(poll_module, "PostgresRepository", lambda _config: repository)
+    monkeypatch.setattr(poll_module, "ApiClient", lambda _key, _timeout: client)
+    return repository
+
+
+def test_poll_stores_one_snapshot_per_run(
+    poll_env: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = ApiPayload(header={"version": "2"}, entity=[], entity_present=True)
+    repository = stub_poll_dependencies(monkeypatch, payload)
+
+    result = poll_gtfs.fn()
+
+    repository.ensure_storage.assert_called_once()
+    (ingested_at, stored), _ = repository.insert.call_args
+    assert stored is payload
+    assert result == {"ingested_at": ingested_at.isoformat()}
+
+
+def test_poll_failure_is_raised_without_inserting(
+    poll_env: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = stub_poll_dependencies(monkeypatch, ConnectionError("upstream down"))
+
+    with pytest.raises(ConnectionError):
+        poll_gtfs.fn()
+
+    repository.insert.assert_not_called()
+    assert "api_fetch" in poll_env.error.call_args.args[1]
+
+
+def test_poll_skips_a_slot_that_started_a_full_interval_late(
+    poll_env: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository = stub_poll_dependencies(
+        monkeypatch, ApiPayload(header={}, entity=None, entity_present=False)
+    )
+    monkeypatch.setattr(poll_module, "_lateness_seconds", lambda: 120.0)
+
+    result = poll_gtfs.fn()
+
+    assert result.is_completed() and result.name == "Skipped"
+    repository.ensure_storage.assert_not_called()
+    repository.insert.assert_not_called()
+
+
+def test_dbt_run_logs_output_and_propagates_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logger = MagicMock()
+    process = MagicMock()
+    process.stdout = iter(["dbt output\n"])
+    process.wait.return_value = 1
+    popen = MagicMock()
+    popen.return_value.__enter__.return_value = process
+    monkeypatch.setattr("dags.dbt.get_run_logger", lambda: logger)
+    monkeypatch.setattr("dags.dbt.subprocess.Popen", popen)
+
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        dbt_daily_run.fn()
+
+    assert error.value.returncode == 1
+    popen.assert_called_once_with(
+        ["poetry", "run", "dbt", "run", "-t", "prod"],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    logger.info.assert_called_once_with("%s", "dbt output")
+
+
+def test_deployments_keep_existing_names_and_schedules() -> None:
+    deployments = {d.name: d for d in build_deployments(120, "America/Sao_Paulo")}
+
+    assert set(deployments) == {
+        "gtfs-poll",
+        "hourly-parquet-export",
+        "daily-retention",
+        "dbt-daily-run",
+    }
+
+    poll = deployments["gtfs-poll"]
+    assert poll.schedules[0].schedule.interval == timedelta(seconds=120)
+    assert poll.concurrency_limit == 1
+    assert poll.concurrency_options.collision_strategy == ConcurrencyLimitStrategy.CANCEL_NEW
+
+    for name, cron, zone in [
+        ("hourly-parquet-export", "5 * * * *", "America/Sao_Paulo"),
+        ("daily-retention", "30 1 * * *", "America/Sao_Paulo"),
+        ("dbt-daily-run", "0 4 * * *", "America/Sao_Paulo"),
+    ]:
+        schedule = deployments[name].schedules[0].schedule
+        assert (schedule.cron, schedule.timezone) == (cron, zone)

@@ -29,7 +29,7 @@ test:
 	$(BIN)/python -m pytest -q
 
 run:
-	$(BIN)/gtfs-poller
+	$(BIN)/gtfs-pipelines
 
 build:
 	docker compose build
@@ -41,16 +41,16 @@ down:
 	docker compose down
 
 prefect-build:
-	docker compose build prefect-server prefect-flows
+	docker compose build prefect-server
 
 prefect-up:
-	docker compose up -d prefect-server prefect-flows
+	docker compose up -d prefect-server
 
 prefect-down:
-	docker compose down prefect-server prefect-flows
+	docker compose down prefect-server
 
 prefect-logs:
-	docker compose logs -f prefect-server prefect-flows
+	docker compose logs -f prefect-server
 
 network-up:
 	docker network create gtfs-shared

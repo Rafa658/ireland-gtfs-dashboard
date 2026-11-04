@@ -1,27 +1,4 @@
 services:
-  poller:
-    build:
-      context: .
-    env_file:
-      - .env
-    ports:
-      - "${APP_PORT:-1000}:${APP_PORT:-1000}"
-    restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import os, urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"APP_PORT\"]}/health', timeout=5)",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   prefect-server:
     build:
       context: .
@@ -43,23 +20,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    networks:
-      - gtfs-shared
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  prefect-flows:
-    build:
-      context: .
-      dockerfile: Dockerfile.prefect
-    env_file:
-      - .env
-    environment:
-      PREFECT_API_URL: "http://prefect-server:4200/api"
-    depends_on:
-      prefect-server:
-        condition: service_healthy
-    restart: unless-stopped
     networks:
       - gtfs-shared
     extra_hosts:
