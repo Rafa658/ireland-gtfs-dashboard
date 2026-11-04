@@ -1,7 +1,7 @@
 import argparse
 from datetime import datetime
 
-from pipelines.flows import backfill_hourly_snapshots
+from dags.backfill import backfill_hourly_snapshots
 
 
 def _timestamp(value: str) -> datetime:

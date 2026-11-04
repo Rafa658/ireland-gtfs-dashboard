@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -5,16 +6,16 @@ from zoneinfo import ZoneInfo
 import duckdb
 import pytest
 
-from pipelines.config import PipelineConfig
-from pipelines.flows import (
-    _create_object_store_secret,
-    _quote_identifier,
-    _quote_literal,
-    _timestamp_literal,
-    backfill_hourly_snapshots,
-    enforce_retention,
-    export_hourly_snapshots,
+from dags.backfill import backfill_hourly_snapshots
+from dags.hourly_export import export_hourly_snapshots
+from dags.retention import enforce_retention
+from pipelines.archive import (
+    create_object_store_secret,
+    quote_identifier,
+    quote_literal,
+    timestamp_literal,
 )
+from pipelines.config import PipelineConfig
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 
@@ -95,6 +96,11 @@ class FakePostgresConnection:
         return None
 
 
+@pytest.fixture(autouse=True)
+def archive_slot_without_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("pipelines.archive.archive_slot", nullcontext)
+
+
 @pytest.fixture
 def pipeline_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for key, value in PIPELINE_ENV.items():
@@ -102,17 +108,17 @@ def pipeline_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quote_literal_escapes_embedded_quotes() -> None:
-    assert _quote_literal("se'cret") == "'se''cret'"
+    assert quote_literal("se'cret") == "'se''cret'"
 
 
 def test_quote_identifier_escapes_embedded_quotes() -> None:
-    assert _quote_identifier('tab"le') == '"tab""le"'
+    assert quote_identifier('tab"le') == '"tab""le"'
 
 
 def test_timestamp_literal_keeps_the_local_utc_offset() -> None:
     value = datetime(2026, 9, 19, 18, 0, tzinfo=SAO_PAULO)
 
-    assert _timestamp_literal(value) == "TIMESTAMPTZ '2026-09-19T18:00:00-03:00'"
+    assert timestamp_literal(value) == "TIMESTAMPTZ '2026-09-19T18:00:00-03:00'"
 
 
 def test_object_store_secret_is_scoped_to_the_configured_bucket(pipeline_env: None) -> None:
@@ -121,7 +127,7 @@ def test_object_store_secret_is_scoped_to_the_configured_bucket(pipeline_env: No
     connection.execute("INSTALL httpfs")
     connection.execute("LOAD httpfs")
 
-    _create_object_store_secret(connection, config)
+    create_object_store_secret(connection, config)
 
     secrets = connection.execute(
         "SELECT name, type, scope FROM duckdb_secrets() WHERE name = 'object_store'"
@@ -133,7 +139,7 @@ def test_export_writes_the_previous_hour_to_a_partitioned_parquet_object(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakeDuckDBConnection(row_count=42)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = export_hourly_snapshots.fn(run_at=datetime(2026, 9, 19, 22, 5, tzinfo=UTC))
 
@@ -157,7 +163,7 @@ def test_export_skips_writing_when_the_window_is_empty(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakeDuckDBConnection(row_count=0)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = export_hourly_snapshots.fn(run_at=datetime(2026, 9, 19, 22, 5, tzinfo=UTC))
 
@@ -169,7 +175,7 @@ def test_retention_deletes_rows_older_than_three_local_days(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakePostgresConnection()
-    monkeypatch.setattr("pipelines.flows.psycopg.connect", lambda _dsn: connection)
+    monkeypatch.setattr("dags.retention.psycopg.connect", lambda _dsn: connection)
 
     result = enforce_retention.fn(run_at=datetime(2026, 9, 19, 4, 30, tzinfo=UTC))
 
@@ -185,7 +191,7 @@ def test_backfill_exports_every_whole_hour_in_the_range(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakeDuckDBConnection(row_count=10)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = backfill_hourly_snapshots.fn(
         start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
@@ -215,7 +221,7 @@ def test_backfill_defaults_to_archive_initial_start(
 ) -> None:
     monkeypatch.setenv("ARCHIVE_INITIAL_START", "2026-09-19T00:00:00-03:00")
     connection = FakeDuckDBConnection(row_count=1)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = backfill_hourly_snapshots.fn(
         end=datetime(2026, 9, 19, 2, 0, tzinfo=SAO_PAULO), max_hours=0
@@ -230,7 +236,7 @@ def test_backfill_skips_empty_hours_without_writing_objects(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakeDuckDBConnection(row_count=[5, 0, 7])
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = backfill_hourly_snapshots.fn(
         start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
@@ -248,7 +254,7 @@ def test_backfill_caps_a_run_and_reports_the_remainder(
     pipeline_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     connection = FakeDuckDBConnection(row_count=1)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: connection)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: connection)
 
     result = backfill_hourly_snapshots.fn(
         start=datetime(2026, 9, 19, 0, 0, tzinfo=SAO_PAULO),
@@ -272,7 +278,7 @@ def test_capped_runs_resumed_via_next_start_cover_every_hour_exactly_once(
 
     while cursor is not None:
         connection = FakeDuckDBConnection(row_count=1)
-        monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _c, _f=connection: _f)
+        monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _c, _f=connection: _f)
         result = backfill_hourly_snapshots.fn(start=cursor, end=end, max_hours=3)
         written += [s.split("/")[-1].split("'")[0] for s in connection.copy_statements]
         nxt = result["next_start"]
@@ -295,11 +301,11 @@ def test_backfill_hour_matches_the_scheduled_export_for_the_same_hour(
 ) -> None:
     """A backfilled hour must write the same object with the same predicate."""
     scheduled = FakeDuckDBConnection(row_count=9)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: scheduled)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: scheduled)
     export_hourly_snapshots.fn(run_at=datetime(2026, 9, 19, 19, 5, tzinfo=SAO_PAULO))
 
     backfilled = FakeDuckDBConnection(row_count=9)
-    monkeypatch.setattr("pipelines.flows._duckdb_connection", lambda _config: backfilled)
+    monkeypatch.setattr("pipelines.archive.duckdb_connection", lambda _config: backfilled)
     backfill_hourly_snapshots.fn(
         start=datetime(2026, 9, 19, 18, 0, tzinfo=SAO_PAULO),
         end=datetime(2026, 9, 19, 19, 0, tzinfo=SAO_PAULO),
