@@ -1,6 +1,7 @@
 from unittest.mock import Mock
 
 import pytest
+import requests
 
 from poller.api_client import (
     API_ENDPOINT,
@@ -82,3 +83,40 @@ def test_rejects_redirects_without_forwarding_the_api_key() -> None:
         timeout=30,
         allow_redirects=False,
     )
+
+
+def test_retries_a_timed_out_request_once() -> None:
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {"header": {}}
+    response.raise_for_status.return_value = None
+    session = Mock()
+    session.get.side_effect = [requests.exceptions.ReadTimeout(), response]
+
+    payload = ApiClient("secret-key", timeout_seconds=10, session=session).fetch()
+
+    assert session.get.call_count == 2
+    assert payload.header == {}
+
+
+def test_raises_after_exhausting_attempts_on_timeouts() -> None:
+    session = Mock()
+    session.get.side_effect = requests.exceptions.ReadTimeout()
+
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        ApiClient("secret-key", timeout_seconds=10, session=session).fetch()
+
+    assert session.get.call_count == 2
+
+
+def test_does_not_retry_http_errors() -> None:
+    response = Mock()
+    response.status_code = 500
+    response.raise_for_status.side_effect = requests.exceptions.HTTPError()
+    session = Mock()
+    session.get.return_value = response
+
+    with pytest.raises(requests.exceptions.HTTPError):
+        ApiClient("secret-key", timeout_seconds=10, session=session).fetch()
+
+    session.get.assert_called_once()

@@ -27,18 +27,30 @@ class ApiClient:
         api_key: str,
         timeout_seconds: int,
         session: requests.Session | None = None,
+        attempts: int = 2,
     ) -> None:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._session = session or requests.Session()
+        self._attempts = attempts
+
+    def _get_with_retry(self) -> requests.Response:
+        """Retry only timeouts and connection errors; the API occasionally stalls a request."""
+        for attempt in range(1, self._attempts + 1):
+            try:
+                return self._session.get(
+                    API_ENDPOINT,
+                    headers={"Accept": "application/json", "x-api-key": self._api_key},
+                    timeout=self._timeout_seconds,
+                    allow_redirects=False,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                if attempt == self._attempts:
+                    raise
+        raise AssertionError("attempts must be at least 1")
 
     def fetch(self) -> ApiPayload:
-        response = self._session.get(
-            API_ENDPOINT,
-            headers={"Accept": "application/json", "x-api-key": self._api_key},
-            timeout=self._timeout_seconds,
-            allow_redirects=False,
-        )
+        response = self._get_with_retry()
         if 300 <= response.status_code < 400:
             raise ApiRedirectError("API redirects are not allowed")
         response.raise_for_status()

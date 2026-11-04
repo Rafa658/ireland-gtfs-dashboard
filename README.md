@@ -13,7 +13,9 @@ against the Prefect server.
 - Requires a top-level `header` key. The `entity` key is optional.
 - Stores one row per successful poll using a UTC ingestion timestamp.
 - Creates the configured schema and table when missing, but never modifies existing objects.
-- A failed poll fails its Prefect run (no retries); the next scheduled run tries again. A run
+- A timed-out or dropped request is retried once within the same run (`API_TIMEOUT_SECONDS` per
+  attempt, so keep it well under the interval). Any other failure fails the Prefect run with
+  no further retries; the next scheduled run tries again. A run
   still going when the next slot arrives cancels that new slot, and a slot that starts a full
   interval late is skipped (state `Skipped`) instead of ingested as a stale snapshot.
 - There is no HTTP endpoint; monitor the `poll-gtfs` runs in the Prefect UI.
