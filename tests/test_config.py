@@ -4,7 +4,6 @@ from poller.config import Config, ConfigError
 
 REQUIRED_ENV = {
     "API_KEY": "secret-key",
-    "APP_PORT": "1000",
     "POLL_INTERVAL_SECONDS": "120",
     "API_TIMEOUT_SECONDS": "30",
     "POSTGRES_CONNECT_TIMEOUT_SECONDS": "10",
@@ -16,7 +15,6 @@ REQUIRED_ENV = {
     "POSTGRES_SCHEMA": "gtfs",
     "POSTGRES_TABLE": "snapshots",
     "POSTGRES_SSLMODE": "prefer",
-    "LOG_LEVEL": "INFO",
 }
 
 
@@ -31,7 +29,6 @@ def test_loads_valid_environment_configuration(monkeypatch: pytest.MonkeyPatch) 
     config = Config.from_env()
 
     assert config.api_key == "secret-key"
-    assert config.app_port == 1000
     assert config.poll_interval_seconds == 120
     assert config.postgres_schema == "gtfs"
     assert config.postgres_table == "snapshots"
@@ -69,7 +66,6 @@ def test_rejects_unchanged_template_placeholders(
 @pytest.mark.parametrize(
     ("name", "value"),
     [
-        ("APP_PORT", "0"),
         ("POLL_INTERVAL_SECONDS", "-1"),
         ("API_TIMEOUT_SECONDS", "not-a-number"),
         ("POSTGRES_CONNECT_TIMEOUT_SECONDS", "0"),

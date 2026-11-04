@@ -31,7 +31,6 @@ def _positive_int(name: str, *, maximum: int | None = None) -> int:
 @dataclass(frozen=True, slots=True)
 class Config:
     api_key: str
-    app_port: int
     poll_interval_seconds: int
     api_timeout_seconds: int
     postgres_connect_timeout_seconds: int
@@ -43,17 +42,11 @@ class Config:
     postgres_schema: str
     postgres_table: str
     postgres_sslmode: str
-    log_level: str
 
     @classmethod
     def from_env(cls) -> "Config":
-        log_level = _required("LOG_LEVEL").upper()
-        if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-            raise ConfigError("LOG_LEVEL must be DEBUG, INFO, WARNING, ERROR, or CRITICAL")
-
         return cls(
             api_key=_required("API_KEY"),
-            app_port=_positive_int("APP_PORT", maximum=65535),
             poll_interval_seconds=_positive_int("POLL_INTERVAL_SECONDS"),
             api_timeout_seconds=_positive_int("API_TIMEOUT_SECONDS"),
             postgres_connect_timeout_seconds=_positive_int("POSTGRES_CONNECT_TIMEOUT_SECONDS"),
@@ -65,5 +58,4 @@ class Config:
             postgres_schema=_required("POSTGRES_SCHEMA"),
             postgres_table=_required("POSTGRES_TABLE"),
             postgres_sslmode=_required("POSTGRES_SSLMODE"),
-            log_level=log_level,
         )

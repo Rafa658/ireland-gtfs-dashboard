@@ -41,7 +41,6 @@ class FakeConnection(AbstractContextManager["FakeConnection"]):
 def config() -> Config:
     return Config(
         api_key="secret",
-        app_port=1000,
         poll_interval_seconds=120,
         api_timeout_seconds=30,
         postgres_connect_timeout_seconds=10,
@@ -53,7 +52,6 @@ def config() -> Config:
         postgres_schema="gtfs-data",
         postgres_table="vehicle snapshots",
         postgres_sslmode="prefer",
-        log_level="INFO",
     )
 
 
