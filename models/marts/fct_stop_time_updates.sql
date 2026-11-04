@@ -2,7 +2,8 @@
     config(
         materialized = 'incremental',
         incremental_strategy = 'delete+insert',
-        unique_key = 'ingestion_date'
+        unique_key = 'ingestion_date',
+        enabled=false
     )
 }}
 -- Grain: one prediction for a trip at a stop in a feed snapshot.
