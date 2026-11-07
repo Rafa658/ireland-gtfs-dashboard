@@ -2,12 +2,6 @@ name: dbt CI/CD Pipeline
 run-name: dbt CI/CD Pipeline
 on: [push]
 
-on:
-  pull_request:
-    branches: [ main, develop ]
-  push:
-    branches: [ main ]
-
 jobs:
   setup-dbt-env:
     runs-on: ubuntu-latest
