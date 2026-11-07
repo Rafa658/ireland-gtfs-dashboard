@@ -1,0 +1,57 @@
+name: dbt CI/CD Pipeline
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  setup-dbt-env:
+    runs-on: ubuntu-latest
+
+    env:
+      DBT_PROFILES_DIR: ${{ github.workspace }}/.ci
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.13'
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade poetry
+
+      - name: Install Poetry dependencies
+        run: |
+          poetry add dbt-core dbt-bigquery sqlfluff
+          poetry install --with dev
+
+  # lint-sql:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+  #     - name: Lint SQL with SQLFluff
+  #       run: sqlfluff lint models/
+
+  # dbt-slim-run:
+  #   runs-on: ubuntu-latest
+
+  #   steps:
+
+  #     - name: Run dbt build (slim CI example)
+  #       run: dbt build --select state:modified+ --defer --state ./
+
+  #     - name: Run dbt tests
+  #       run: dbt test
+
+  #     - name: Upload artifacts/report
+  #       if: always()
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: dbt-artifacts
+  #         path: target/
