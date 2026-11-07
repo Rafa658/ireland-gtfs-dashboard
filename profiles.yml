@@ -6,7 +6,7 @@ ireland_gtfs:
       path: gtfs.duckdb
       schema: z_dev
       settings:
-        memory_limit: 16GB
+        memory_limit: 8GB
         threads: 4
       threads: 1
       extensions:
@@ -24,7 +24,7 @@ ireland_gtfs:
       type: duckdb
       path: gtfs.duckdb
       settings:
-        memory_limit: 16GB
+        memory_limit: 8GB
         threads: 4
       threads: 1
       extensions:
