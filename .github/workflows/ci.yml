@@ -26,12 +26,12 @@ jobs:
         run: |
           poetry install
 
-  # lint-sql:
-  #   runs-on: ubuntu-latest
+  lint-sql:
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - name: Lint SQL with SQLFluff
-  #       run: sqlfluff lint models/
+    steps:
+      - name: Lint SQL with SQLFluff
+        run: poetry run sqlfluff lint models/
 
   # dbt-slim-run:
   #   runs-on: ubuntu-latest
