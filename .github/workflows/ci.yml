@@ -33,7 +33,7 @@ jobs:
         run: poetry run sqlfluff lint models/
 
       - name: Run dbt build (slim CI example)
-        run: dbt run --select state:modified+ --empty --defer --state ./
+        run: poetry run dbt run --select state:modified+ --empty --defer --state ./
 
       - name: Upload artifacts/report
         if: always()
