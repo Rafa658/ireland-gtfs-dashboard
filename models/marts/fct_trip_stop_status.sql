@@ -3,7 +3,7 @@
         materialized = 'incremental',
         incremental_strategy = 'delete+insert',
         unique_key = ['trip_key', 'stop_sequence'],
-	enabled=false
+        enabled=false
     )
 }}
 -- Accumulating snapshot fact.
