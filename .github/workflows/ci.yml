@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DBT_PROFILES_DIR: ${{ github.workspace }}/profiles.yml
+      DBT_PROFILES_DIR: ${{ github.workspace }}
 
     steps:
       - name: Checkout code

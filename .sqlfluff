@@ -6,6 +6,6 @@ exclude_rules = RF02
 
 [sqlfluff:templater:dbt]
 project_dir = .
-profiles_dir = ./profiles.yml
+profiles_dir = .
 profile = ireland_gtfs
 target = ci
