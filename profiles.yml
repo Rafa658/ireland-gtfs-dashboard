@@ -38,3 +38,22 @@ ireland_gtfs:
           region: "{{ env_var('MINIO_REGION', 'us-east-1') }}"
           url_style: path
           use_ssl: "{{ env_var('MINIO_USE_SSL', 'false') }}"
+    ci:
+      type: duckdb
+      path: gtfs.duckdb
+      schema: z_ci
+      settings:
+        memory_limit: 16GB
+        threads: 4
+      threads: 1
+      extensions:
+        - httpfs
+        - parquet
+      secrets:
+        - type: s3
+          key_id: "{{ env_var('MINIO_ACCESS_KEY') }}"
+          secret: "{{ env_var('MINIO_SECRET_KEY') }}"
+          endpoint: "{{ env_var('MINIO_ENDPOINT', 'localhost:9000') }}"
+          region: "{{ env_var('MINIO_REGION', 'us-east-1') }}"
+          url_style: path
+          use_ssl: "{{ env_var('MINIO_USE_SSL', 'false') }}"
