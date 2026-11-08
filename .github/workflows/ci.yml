@@ -32,20 +32,12 @@ jobs:
       - name: Lint SQL with SQLFluff
         run: poetry run sqlfluff lint models/
 
-  # dbt-slim-run:
-  #   runs-on: ubuntu-latest
+      - name: Run dbt build (slim CI example)
+        run: dbt run --select state:modified+ --empty --defer --state ./
 
-  #   steps:
-
-  #     - name: Run dbt build (slim CI example)
-  #       run: dbt build --select state:modified+ --defer --state ./
-
-  #     - name: Run dbt tests
-  #       run: dbt test
-
-  #     - name: Upload artifacts/report
-  #       if: always()
-  #       uses: actions/upload-artifact@v3
-  #       with:
-  #         name: dbt-artifacts
-  #         path: target/
+      - name: Upload artifacts/report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: dbt-artifacts
+          path: target/
