@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DBT_PROFILES_DIR: ${{ github.workspace }}/.ci
+      DBT_PROFILES_DIR: ${{ github.workspace }}/profiles.yml
 
     steps:
       - name: Checkout code
@@ -26,10 +26,6 @@ jobs:
         run: |
           poetry install
 
-  lint-sql:
-    runs-on: ubuntu-latest
-
-    steps:
       - name: Lint SQL with SQLFluff
         run: poetry run sqlfluff lint models/
 
