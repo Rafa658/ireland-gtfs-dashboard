@@ -8,4 +8,4 @@ exclude_rules = RF02
 project_dir = .
 profiles_dir = .
 profile = ireland_gtfs
-target = ci
+target = stg
