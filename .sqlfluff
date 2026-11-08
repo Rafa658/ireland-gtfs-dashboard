@@ -1,6 +1,11 @@
 [sqlfluff]
-templater = jinja
+templater = dbt
 encoding = utf-8
 dialect = duckdb
-# RF02 false-positives on `select max(...) from {{ this }}` incremental filters
 exclude_rules = RF02
+
+[sqlfluff:templater:dbt]
+project_dir = .
+profiles_dir = ./profiles.yml
+profile = ireland-gtfs
+target = ci
