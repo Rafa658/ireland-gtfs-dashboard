@@ -7,7 +7,8 @@ from prefect.client.schemas.objects import ConcurrencyLimitStrategy
 from prefect.states import Completed
 
 from dags import poll_gtfs as poll_module
-from dags.dbt import PROJECT_ROOT, dbt_daily_run
+from dags import dbt as dbt_module
+from dags.dbt import PROJECT_ROOT, dbt_daily_run, dbt_run, git_pull, publish_manifest
 from dags.poll_gtfs import poll_gtfs
 from dags.serve import build_deployments
 from poller.api_client import ApiPayload
@@ -106,7 +107,7 @@ def test_dbt_run_logs_output_and_propagates_failure(
     monkeypatch.setattr("dags.dbt.subprocess.Popen", popen)
 
     with pytest.raises(subprocess.CalledProcessError) as error:
-        dbt_daily_run.fn()
+        dbt_run.fn()
 
     assert error.value.returncode == 1
     popen.assert_called_once_with(
@@ -117,6 +118,57 @@ def test_dbt_run_logs_output_and_propagates_failure(
         text=True,
     )
     logger.info.assert_called_once_with("%s", "dbt output")
+
+
+def test_git_pull_fetches_then_pulls_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_command = MagicMock()
+    monkeypatch.setattr(dbt_module, "_run_command", run_command)
+
+    git_pull.fn()
+
+    assert [c.args[0] for c in run_command.call_args_list] == [
+        ["git", "fetch", "origin"],
+        ["git", "pull", "origin", "main"],
+    ]
+
+
+def test_git_pull_stops_when_fetch_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_command = MagicMock(side_effect=subprocess.CalledProcessError(1, ["git"]))
+    monkeypatch.setattr(dbt_module, "_run_command", run_command)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        git_pull.fn()
+
+    run_command.assert_called_once()
+
+
+def test_publish_manifest_copies_into_prod_artifacts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    manifest = tmp_path / "target" / "manifest.json"
+    manifest.parent.mkdir()
+    manifest.write_text('{"nodes": {}}')
+    prod_dir = tmp_path / "artifacts" / "prod"
+    monkeypatch.setattr(dbt_module, "MANIFEST_PATH", manifest)
+    monkeypatch.setattr(dbt_module, "PROD_ARTIFACTS_DIR", prod_dir)
+    monkeypatch.setattr(dbt_module, "get_run_logger", MagicMock)
+
+    destination = publish_manifest.fn()
+
+    assert destination == prod_dir / "manifest.json"
+    assert destination.read_text() == '{"nodes": {}}'
+
+
+def test_dbt_flow_pulls_before_run_and_publishes_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = MagicMock()
+    for name in ("git_pull", "dbt_run", "publish_manifest"):
+        monkeypatch.setattr(dbt_module, name, getattr(calls, name))
+
+    dbt_daily_run.fn()
+
+    assert [c[0] for c in calls.mock_calls] == ["git_pull", "dbt_run", "publish_manifest"]
 
 
 def test_deployments_keep_existing_names_and_schedules() -> None:
