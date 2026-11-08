@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Poetry dependencies
         run: |
-          poetry install
+          poetry install --extras pipelines
 
       - name: Lint SQL with SQLFluff
         run: poetry run sqlfluff lint models/
