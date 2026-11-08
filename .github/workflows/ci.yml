@@ -5,8 +5,6 @@ on: [push]
 jobs:
   setup-dbt-env:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/catthehacker/ubuntu:act-24.04
 
     env:
       DBT_PROFILES_DIR: ${{ github.workspace }}/.ci
