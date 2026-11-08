@@ -11,6 +11,7 @@ jobs:
       MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
       MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
       MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+      PREFECT_API_URL: ${{ secrets.PREFECT_API_URL }}
 
     steps:
       - name: Checkout code
@@ -39,8 +40,10 @@ jobs:
           poetry run dbt parse --project-dir ../main --target prod \
             --target-path "$PWD/artifacts/prod"
 
-      - name: dbt empty run
-        run: poetry run dbt run --select state:modified+ --empty --defer --state ./artifacts/prod/
+      # The homelab does the actual dbt run (stg target, deferring to its prod manifest).
+      - name: dbt run on the homelab
+        if: github.ref != 'refs/heads/main'
+        run: poetry run prefect deployment run 'dbt-ci/dbt-ci' --param ref="$GITHUB_SHA" --watch
 
       - name: Upload artifacts
         if: always()
