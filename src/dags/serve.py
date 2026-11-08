@@ -6,7 +6,7 @@ from prefect.client.schemas.objects import ConcurrencyLimitConfig, ConcurrencyLi
 from prefect.deployments.runner import EntrypointType
 from prefect.schedules import Cron, Interval
 
-from dags.dbt import dbt_daily_run
+from dags.dbt import DBT_LIMIT_NAME, dbt_ci, dbt_prod
 from dags.hourly_export import export_hourly_snapshots
 from dags.poll_gtfs import poll_gtfs
 from dags.retention import enforce_retention
@@ -15,13 +15,14 @@ from pipelines.config import PipelineConfig
 from poller.config import Config
 
 DBT_TIMEZONE = "America/Sao_Paulo"
-# Polling, one archive job, dbt, and headroom for archive jobs waiting on their slot.
+# Polling, one archive job, dbt (prod or CI), and headroom for jobs waiting on their slot.
 MAX_CONCURRENT_RUNS = 6
 
 
-def ensure_archive_limit() -> None:
+def ensure_concurrency_limits() -> None:
     with get_client(sync_client=True) as client:
-        client.upsert_global_concurrency_limit_by_name(ARCHIVE_LIMIT_NAME, limit=1)
+        for name in (ARCHIVE_LIMIT_NAME, DBT_LIMIT_NAME):
+            client.upsert_global_concurrency_limit_by_name(name, limit=1)
 
 
 def build_deployments(poll_interval_seconds: int, archive_timezone: str) -> list:
@@ -46,11 +47,12 @@ def build_deployments(poll_interval_seconds: int, archive_timezone: str) -> list
             schedule=Cron("30 1 * * *", timezone=archive_timezone),
             entrypoint_type=module_path,
         ),
-        dbt_daily_run.to_deployment(
-            name="dbt-daily-run",
+        dbt_prod.to_deployment(
+            name="dbt-prod",
             schedule=Cron("0 4 * * *", timezone=DBT_TIMEZONE),
             entrypoint_type=module_path,
         ),
+        dbt_ci.to_deployment(name="dbt-ci", entrypoint_type=module_path),
     ]
 
 
@@ -60,7 +62,7 @@ def run() -> None:
     poll_interval_seconds = Config.from_env().poll_interval_seconds
     archive_timezone = PipelineConfig.from_env().archive_timezone
 
-    ensure_archive_limit()
+    ensure_concurrency_limits()
     serve(
         *build_deployments(poll_interval_seconds, archive_timezone),
         limit=MAX_CONCURRENT_RUNS,
