@@ -65,9 +65,10 @@ reads Postgres directly (`postgres` extension) and writes Parquet straight to Mi
 | `export-hourly-snapshots/hourly-parquet-export` | `5 * * * *` | Exports the whole preceding hour, every hour. A run at 05:05 exports `04:00 <= timestamp < 05:00`; a run at 19:05 exports `18:00 <= timestamp < 19:00`. |
 | `enforce-retention/daily-retention` | `30 1 * * *` | Deletes rows older than `RETENTION_DAYS` whole local days. |
 | `poll-gtfs/gtfs-poll` | every `POLL_INTERVAL_SECONDS` | One snapshot per run (see Behavior). |
-| `dbt-daily-run/dbt-daily-run` | `0 4 * * *` (`America/Sao_Paulo`) | Runs `poetry run dbt run -t prod` from the repository root. |
+| `dbt-prod/dbt-prod` | `0 4 * * *` (`America/Sao_Paulo`) | `git pull`, `dbt run -t prod`, then copies `target/manifest.json` to `artifacts/prod`. |
+| `dbt-ci/dbt-ci` | on demand (`ref` = commit SHA) | Runs modified models (`state:modified+`) into a throwaway `gtfs_stg.duckdb`, deferring to the prod manifest in `artifacts/prod` and attaching `gtfs.duckdb` read-only. |
 
-Export and retention share the `gtfs-archive` global concurrency limit (1), which the runner
+`dbt-prod` and `dbt-ci` share the `gtfs-dbt` limit (1) so DuckDB files are never read and written at once. Export and retention share the `gtfs-archive` global concurrency limit (1), which the runner
 creates at startup, so they never overlap. Polling and dbt are not blocked by them.
 
 Exports land at:

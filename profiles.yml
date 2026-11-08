@@ -3,12 +3,11 @@ ireland_gtfs:
   outputs:
     dev:
       type: duckdb
-      path: gtfs.duckdb
+      path: gtfs_dev.duckdb
       schema: z_dev
       settings:
         memory_limit: 8GB
         threads: 4
-      threads: 1
       extensions:
         - httpfs
         - parquet
@@ -26,7 +25,6 @@ ireland_gtfs:
       settings:
         memory_limit: 8GB
         threads: 4
-      threads: 1
       extensions:
         - httpfs
         - parquet
@@ -38,14 +36,18 @@ ireland_gtfs:
           region: "{{ env_var('MINIO_REGION', 'us-east-1') }}"
           url_style: path
           use_ssl: "{{ env_var('MINIO_USE_SSL', 'false') }}"
-    ci:
+    stg:
       type: duckdb
-      path: gtfs.duckdb
-      schema: z_ci
+      path: gtfs_stg.duckdb
+      schema: z_stg
+      # Prod is attached read-only so deferred refs resolve to gtfs.<schema>.<model>.
+      attach:
+        - path: "{{ env_var('PROD_DUCKDB_PATH', 'gtfs.duckdb') }}"
+          alias: gtfs
+          read_only: true
       settings:
-        memory_limit: 16GB
+        memory_limit: 2GB
         threads: 4
-      threads: 1
       extensions:
         - httpfs
         - parquet

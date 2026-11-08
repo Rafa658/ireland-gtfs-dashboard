@@ -1,4 +1,5 @@
 import subprocess
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -8,7 +9,7 @@ from prefect.states import Completed
 
 from dags import poll_gtfs as poll_module
 from dags import dbt as dbt_module
-from dags.dbt import PROJECT_ROOT, dbt_daily_run, dbt_run, git_pull, publish_manifest
+from dags.dbt import PROJECT_ROOT, dbt_ci, dbt_prod, dbt_run, git_pull, publish_manifest
 from dags.poll_gtfs import poll_gtfs
 from dags.serve import build_deployments
 from poller.api_client import ApiPayload
@@ -105,6 +106,7 @@ def test_dbt_run_logs_output_and_propagates_failure(
     popen.return_value.__enter__.return_value = process
     monkeypatch.setattr("dags.dbt.get_run_logger", lambda: logger)
     monkeypatch.setattr("dags.dbt.subprocess.Popen", popen)
+    monkeypatch.setattr(dbt_module, "concurrency", lambda *_a, **_k: nullcontext())
 
     with pytest.raises(subprocess.CalledProcessError) as error:
         dbt_run.fn()
@@ -113,6 +115,7 @@ def test_dbt_run_logs_output_and_propagates_failure(
     popen.assert_called_once_with(
         ["poetry", "run", "dbt", "run", "-t", "prod"],
         cwd=PROJECT_ROOT,
+        env=None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -166,9 +169,64 @@ def test_dbt_flow_pulls_before_run_and_publishes_after(
     for name in ("git_pull", "dbt_run", "publish_manifest"):
         monkeypatch.setattr(dbt_module, name, getattr(calls, name))
 
-    dbt_daily_run.fn()
+    dbt_prod.fn()
 
     assert [c[0] for c in calls.mock_calls] == ["git_pull", "dbt_run", "publish_manifest"]
+
+
+def stub_ci(monkeypatch: pytest.MonkeyPatch, tmp_path) -> MagicMock:
+    run_command = MagicMock()
+    (tmp_path / "manifest.json").write_text("{}")
+    monkeypatch.setattr(dbt_module, "_run_command", run_command)
+    monkeypatch.setattr(dbt_module, "PROD_ARTIFACTS_DIR", tmp_path)
+    monkeypatch.setattr(dbt_module, "concurrency", lambda *_a, **_k: nullcontext())
+    return run_command
+
+
+def test_ci_runs_changed_models_in_a_worktree_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    run_command = stub_ci(monkeypatch, tmp_path)
+
+    dbt_ci.fn("abc1234")
+
+    commands = [c.args[0] for c in run_command.call_args_list]
+    assert commands[0] == ["git", "fetch", "origin"]
+    assert commands[1][:4] == ["git", "worktree", "add", "--detach"] and commands[1][-1] == "abc1234"
+    assert commands[2][1:] == [
+        "run", "--target", "stg", "--select", "state:modified+",
+        "--defer", "--state", str(tmp_path),
+    ]
+    assert commands[3][:4] == ["git", "worktree", "remove", "--force"]
+    assert run_command.call_args_list[2].args[2]["PROD_DUCKDB_PATH"] == str(dbt_module.PROD_DATABASE)
+
+
+def test_ci_removes_worktree_when_run_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    run_command = stub_ci(monkeypatch, tmp_path)
+    run_command.side_effect = lambda command, *_: (
+        (_ for _ in ()).throw(subprocess.CalledProcessError(1, command))
+        if command[1:2] == ["run"]
+        else None
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        dbt_ci.fn("abc1234")
+
+    assert run_command.call_args_list[-1].args[0][:3] == ["git", "worktree", "remove"]
+
+
+@pytest.mark.parametrize("ref", ["--upload-pack=x", "main", ""])
+def test_ci_rejects_refs_that_are_not_commit_shas(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, ref: str
+) -> None:
+    run_command = stub_ci(monkeypatch, tmp_path)
+
+    with pytest.raises(ValueError):
+        dbt_ci.fn(ref)
+
+    run_command.assert_not_called()
 
 
 def test_deployments_keep_existing_names_and_schedules() -> None:
@@ -178,8 +236,10 @@ def test_deployments_keep_existing_names_and_schedules() -> None:
         "gtfs-poll",
         "hourly-parquet-export",
         "daily-retention",
-        "dbt-daily-run",
+        "dbt-prod",
+        "dbt-ci",
     }
+    assert not deployments["dbt-ci"].schedules
 
     poll = deployments["gtfs-poll"]
     assert poll.schedules[0].schedule.interval == timedelta(seconds=120)
@@ -189,7 +249,7 @@ def test_deployments_keep_existing_names_and_schedules() -> None:
     for name, cron, zone in [
         ("hourly-parquet-export", "5 * * * *", "America/Sao_Paulo"),
         ("daily-retention", "30 1 * * *", "America/Sao_Paulo"),
-        ("dbt-daily-run", "0 4 * * *", "America/Sao_Paulo"),
+        ("dbt-prod", "0 4 * * *", "America/Sao_Paulo"),
     ]:
         schedule = deployments[name].schedules[0].schedule
         assert (schedule.cron, schedule.timezone) == (cron, zone)
