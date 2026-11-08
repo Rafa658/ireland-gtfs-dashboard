@@ -8,6 +8,9 @@ jobs:
 
     env:
       DBT_PROFILES_DIR: ${{ github.workspace }}
+      MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+      MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+      MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
 
     steps:
       - name: Checkout code
