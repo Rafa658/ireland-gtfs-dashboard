@@ -32,11 +32,12 @@ jobs:
       - name: Lint SQL with SQLFluff
         run: poetry run sqlfluff lint models/
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: dbt-artifacts
-          path: ./artifacts/prod/
+      - name: Build main manifest
+        run: |
+          git fetch --depth=1 origin main
+          git worktree add ../main FETCH_HEAD
+          poetry run dbt parse --project-dir ../main --target prod \
+            --target-path "$PWD/artifacts/prod"
 
       - name: dbt empty run
         run: poetry run dbt run --select state:modified+ --empty --defer --state ./artifacts/prod/
