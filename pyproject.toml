@@ -32,6 +32,9 @@ gtfs-pipelines = "dags.serve:run"
 gtfs-backfill = "pipelines.backfill:run"
 gtfs-prefect-healthcheck = "pipelines.healthcheck:run"
 
+[tool.poetry]
+package-mode = false
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
